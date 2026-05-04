@@ -200,6 +200,35 @@ def test_runtime_resolution_rebuilds_agent_on_routing_change(monkeypatch):
     assert shell.api_mode == "codex_responses"
 
 
+def test_runtime_resolution_receives_active_cli_model(monkeypatch):
+    cli = _import_cli()
+    captured = {}
+
+    def _runtime_resolve(**kwargs):
+        captured.update(kwargs)
+        return {
+            "provider": "oca",
+            "api_mode": "chat_completions",
+            "base_url": "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+            "api_key": "test-key",
+            "source": "env/config",
+        }
+
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
+    monkeypatch.setattr("hermes_cli.runtime_provider.format_runtime_provider_error", lambda exc: str(exc))
+
+    shell = cli.HermesCLI(
+        model="oca/grok4-1-fast-reasoning",
+        provider="oca",
+        compact=True,
+        max_turns=1,
+    )
+
+    assert shell._ensure_runtime_credentials() is True
+    assert captured["requested"] == "oca"
+    assert captured["target_model"] == "oca/grok4-1-fast-reasoning"
+
+
 def test_cli_turn_routing_uses_primary_when_disabled(monkeypatch):
     cli = _import_cli()
     shell = cli.HermesCLI(model="gpt-5", compact=True, max_turns=1)
