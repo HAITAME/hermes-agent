@@ -33,7 +33,7 @@ from hermes_constants import OPENROUTER_BASE_URL
 
 
 # Providers that support OAuth login in addition to API keys.
-_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "nous", "openai-codex", "qwen-oauth", "google-gemini-cli", "minimax-oauth"}
+_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "nous", "openai-codex", "qwen-oauth", "google-gemini-cli", "minimax-oauth", "oca"}
 
 
 def _get_custom_provider_names() -> list:
@@ -170,7 +170,7 @@ def auth_add_command(args) -> None:
         if provider.startswith(CUSTOM_POOL_PREFIX):
             requested_type = AUTH_TYPE_API_KEY
         else:
-            requested_type = AUTH_TYPE_OAUTH if provider in {"anthropic", "nous", "openai-codex", "qwen-oauth", "google-gemini-cli", "minimax-oauth"} else AUTH_TYPE_API_KEY
+            requested_type = AUTH_TYPE_OAUTH if provider in _OAUTH_CAPABLE_PROVIDERS else AUTH_TYPE_API_KEY
 
     pool = load_pool(provider)
 
@@ -393,6 +393,37 @@ def auth_add_command(args) -> None:
         )
         pool.add_entry(entry)
         print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
+        return
+
+    if provider == "oca":
+        from agent.oca import run_oca_oauth_login_pure
+
+        creds = run_oca_oauth_login_pure(
+            open_browser=not getattr(args, "no_browser", False),
+        )
+        label = (getattr(args, "label", None) or "").strip() or (
+            creds.get("subject") or _oauth_default_label(provider, len(pool.entries()) + 1)
+        )
+        entry = PooledCredential(
+            provider=provider,
+            id=uuid.uuid4().hex[:6],
+            label=label,
+            auth_type=AUTH_TYPE_OAUTH,
+            priority=0,
+            source=f"{SOURCE_MANUAL}:oca_pkce",
+            access_token=creds["access_token"],
+            refresh_token=creds.get("refresh_token"),
+            expires_at=creds.get("expires_at"),
+            base_url=creds.get("base_url"),
+            extra={
+                "token_type": creds.get("token_type"),
+                "scope": creds.get("scope"),
+                "client_id": creds.get("client_id"),
+                "idcs_url": creds.get("idcs_url"),
+            },
+        )
+        pool.add_entry(entry)
+        print(f'Added {provider} SSO credential #{len(pool.entries())}: "{entry.label}"')
         return
 
     raise SystemExit(f"`hermes auth add {provider}` is not implemented for auth type {requested_type} yet.")

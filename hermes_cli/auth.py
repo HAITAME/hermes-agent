@@ -398,6 +398,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("OLLAMA_API_KEY",),
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    "oca": ProviderConfig(
+        id="oca",
+        name="Oracle Code Assist",
+        auth_type="api_key",
+        inference_base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        api_key_env_vars=("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"),
+        base_url_env_var="OCA_BASE_URL",
+    ),
     "bedrock": ProviderConfig(
         id="bedrock",
         name="AWS Bedrock",
@@ -1220,6 +1228,8 @@ def resolve_provider(
         "mimo": "xiaomi", "xiaomi-mimo": "xiaomi",
         "tencent": "tencent-tokenhub", "tokenhub": "tencent-tokenhub",
         "tencent-cloud": "tencent-tokenhub", "tencentmaas": "tencent-tokenhub",
+        "oracle": "oca", "oca": "oca", "oracle-code-assist": "oca",
+        "oci-code-assist": "oca", "code-assist": "oca",
         "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock", "amazon": "bedrock",
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",

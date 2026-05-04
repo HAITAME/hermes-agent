@@ -81,7 +81,7 @@ CUSTOM_POOL_PREFIX = "custom:"
 
 # Fields that are only round-tripped through JSON — never used for logic as attributes.
 _EXTRA_KEYS = frozenset({
-    "token_type", "scope", "client_id", "portal_base_url", "obtained_at",
+    "token_type", "scope", "client_id", "idcs_url", "portal_base_url", "obtained_at",
     "expires_in", "agent_key_id", "agent_key_expires_in", "agent_key_reused",
     "agent_key_obtained_at", "tls",
 })
@@ -714,6 +714,20 @@ class CredentialPool:
                     elif k in _EXTRA_KEYS:
                         extra_updates[k] = v
                 updated = replace(entry, extra=extra_updates, **field_updates)
+            elif self.provider == "oca":
+                from agent.oca import refresh_oca_access_token
+
+                refreshed = refresh_oca_access_token(
+                    entry.refresh_token,
+                    client_id=str(entry.client_id or ""),
+                    idcs_url=str(entry.idcs_url or ""),
+                )
+                updated = replace(
+                    entry,
+                    access_token=str(refreshed.get("access_token") or entry.access_token),
+                    refresh_token=str(refreshed.get("refresh_token") or entry.refresh_token),
+                    expires_at=refreshed.get("expires_at") or entry.expires_at,
+                )
             else:
                 return entry
         except Exception as exc:
@@ -815,6 +829,10 @@ class CredentialPool:
             # runtime credentials are actually resolved, not merely when the pool
             # is enumerated for listing, migration, or selection.
             return False
+        if self.provider == "oca":
+            from agent.oca import is_oca_token_expiring
+
+            return is_oca_token_expiring(entry.access_token, 300)
         return False
 
     def select(self) -> Optional[PooledCredential]:
