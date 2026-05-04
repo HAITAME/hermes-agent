@@ -24,6 +24,7 @@ from agent.auxiliary_client import (
     _normalize_aux_provider,
     _try_payment_fallback,
     _resolve_auto,
+    _validate_llm_response,
 )
 
 
@@ -1945,6 +1946,40 @@ class TestBuildCallKwargsToolDedup:
             provider="openai", model="gpt-4o", messages=[], tools=None,
         )
         assert "tools" not in kwargs
+
+
+class TestOcaAuxiliaryStreaming:
+    def test_oca_call_kwargs_omit_stream_by_provider(self):
+        kwargs = _build_call_kwargs(
+            provider="oca",
+            model="oca/gpt-oss-120b",
+            messages=[{"role": "user", "content": "title"}],
+            base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm/v1",
+        )
+
+        assert "stream" not in kwargs
+
+    def test_oca_call_kwargs_omit_stream_by_base_url_for_auto_provider(self):
+        kwargs = _build_call_kwargs(
+            provider="auto",
+            model="oca/gpt-oss-120b",
+            messages=[{"role": "user", "content": "title"}],
+            base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm/v1/",
+        )
+
+        assert "stream" not in kwargs
+
+    def test_validate_llm_response_coerces_accidental_sse_chunks(self):
+        sse = "\n".join([
+            'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+            'data: {"choices":[{"delta":{"content":"Project"}}]}',
+            'data: {"choices":[{"delta":{"content":" title"},"finish_reason":"stop"}]}',
+            "data: [DONE]",
+        ])
+
+        response = _validate_llm_response(sse, "title_generation")
+
+        assert response.choices[0].message.content == "Project title"
 
 
 @pytest.fixture(autouse=True)

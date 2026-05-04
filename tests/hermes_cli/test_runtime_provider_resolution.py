@@ -120,6 +120,38 @@ def test_resolve_runtime_provider_falls_back_when_pool_empty(monkeypatch):
     assert resolved.get("credential_pool") is None
 
 
+def test_oca_responses_capable_model_uses_responses_api(monkeypatch):
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {
+        "provider": "oca",
+        "default": "oca/gpt-5.3-codex",
+    })
+
+    resolved = rp.resolve_runtime_provider(
+        requested="oca",
+        explicit_api_key="oca-token",
+        explicit_base_url="https://oca.example.com/litellm",
+    )
+
+    assert resolved["provider"] == "oca"
+    assert resolved["api_mode"] == "codex_responses"
+
+
+def test_oca_chat_model_uses_chat_completions(monkeypatch):
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {
+        "provider": "oca",
+        "default": "oca/gpt-oss-120b",
+    })
+
+    resolved = rp.resolve_runtime_provider(
+        requested="oca",
+        explicit_api_key="oca-token",
+        explicit_base_url="https://oca.example.com/litellm",
+    )
+
+    assert resolved["provider"] == "oca"
+    assert resolved["api_mode"] == "chat_completions"
+
+
 def test_resolve_runtime_provider_codex(monkeypatch):
     monkeypatch.setattr(
         rp,
