@@ -54,6 +54,9 @@ _PROVIDER_ENV_HINTS = (
     "OPENCODE_GO_API_KEY",
     "XIAOMI_API_KEY",
     "TOKENHUB_API_KEY",
+    "OCA_ACCESS_TOKEN",
+    "OCA_API_KEY",
+    "OCI_CODE_ASSIST_TOKEN",
 )
 
 
@@ -206,6 +209,7 @@ def _build_apikey_providers_list() -> list:
         ("Kimi / Moonshot (China)", ("KIMI_CN_API_KEY",),                    "https://api.moonshot.cn/v1/models",   None, True),
         ("Arcee AI",         ("ARCEEAI_API_KEY",),                           "https://api.arcee.ai/api/v1/models",  "ARCEE_BASE_URL", True),
         ("GMI Cloud",        ("GMI_API_KEY",),                               "https://api.gmi-serving.com/v1/models", "GMI_BASE_URL", True),
+        ("Oracle Code Assist", ("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"), "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm/v1/models", "OCA_BASE_URL", True),
         ("DeepSeek",         ("DEEPSEEK_API_KEY",),                          "https://api.deepseek.com/v1/models",  "DEEPSEEK_BASE_URL", True),
         ("Hugging Face",     ("HF_TOKEN",),                                  "https://router.huggingface.co/v1/models", "HF_BASE_URL", True),
         ("NVIDIA NIM",       ("NVIDIA_API_KEY",),                            "https://integrate.api.nvidia.com/v1/models", "NVIDIA_BASE_URL", True),
@@ -228,7 +232,7 @@ def _build_apikey_providers_list() -> list:
         "Z.AI / GLM": "zai", "Kimi / Moonshot": "kimi-coding",
         "StepFun Step Plan": "stepfun", "Kimi / Moonshot (China)": "kimi-coding-cn",
         "Arcee AI": "arcee", "GMI Cloud": "gmi", "DeepSeek": "deepseek",
-        "Hugging Face": "huggingface", "NVIDIA NIM": "nvidia",
+        "Oracle Code Assist": "oca", "Hugging Face": "huggingface", "NVIDIA NIM": "nvidia",
         "Alibaba/DashScope": "alibaba", "MiniMax": "minimax",
         "MiniMax (China)": "minimax-cn", "Vercel AI Gateway": "ai-gateway",
         "Kilo Code": "kilocode", "OpenCode Zen": "opencode-zen",
@@ -1213,11 +1217,18 @@ def run_doctor(args):
                     _base = _to_openai_base_url(_base)
                 if base_url_host_matches(_base, "api.kimi.com") and _base.rstrip("/").endswith("/coding"):
                     _base = _base.rstrip("/") + "/v1"
-                _url = (_base.rstrip("/") + "/models") if _base else _default_url
+                if _pname == "Oracle Code Assist" and _base:
+                    _base_clean = _base.rstrip("/")
+                    _url = (_base_clean + "/models") if _base_clean.endswith("/v1") else (_base_clean + "/v1/models")
+                else:
+                    _url = (_base.rstrip("/") + "/models") if _base else _default_url
                 _headers = {
                     "Authorization": f"Bearer {_key}",
                     "User-Agent": _HERMES_USER_AGENT,
                 }
+                if _pname == "Oracle Code Assist":
+                    from agent.oca import create_oca_headers
+                    _headers.update(create_oca_headers(_key, "doctor"))
                 if base_url_host_matches(_base, "api.kimi.com"):
                     _headers["User-Agent"] = "claude-code/0.1.0"
                 _resp = httpx.get(

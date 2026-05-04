@@ -53,6 +53,7 @@ _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "arcee",
     "gmi",
     "tencent-tokenhub",
+    "oca",
     "custom", "local",
     # Common aliases
     "google", "google-gemini", "google-ai-studio",
@@ -64,6 +65,7 @@ _PROVIDER_PREFIXES: frozenset[str] = frozenset({
     "tencent", "tokenhub", "tencent-cloud", "tencentmaas",
     "arcee-ai", "arceeai",
     "gmi-cloud", "gmicloud",
+    "oracle", "oracle-code-assist", "oci-code-assist", "code-assist",
     "xai", "x-ai", "x.ai", "grok",
     "nvidia", "nim", "nvidia-nim", "nemotron",
     "qwen-portal",
@@ -316,6 +318,7 @@ _URL_TO_PROVIDER: Dict[str, str] = {
     "api.gmi-serving.com": "gmi",
     "tokenhub.tencentmaas.com": "tencent-tokenhub",
     "ollama.com": "ollama-cloud",
+    "code-internal.aiservice.us-chicago-1.oci.oraclecloud.com": "oca",
 }
 
 # Auto-extend with hostnames derived from provider profiles.

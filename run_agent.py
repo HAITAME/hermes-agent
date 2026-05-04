@@ -5628,6 +5628,15 @@ class AIAgent:
                     self._client_log_context(),
                 )
                 return client
+        if self.provider == "oca" or base_url_host_matches(
+            str(client_kwargs.get("base_url", "") or ""),
+            "code-internal.aiservice.us-chicago-1.oci.oraclecloud.com",
+        ):
+            from agent.oca import create_oca_headers
+
+            headers = dict(client_kwargs.get("default_headers") or {})
+            headers.update(create_oca_headers(str(client_kwargs.get("api_key") or "")))
+            client_kwargs["default_headers"] = headers
         # Inject TCP keepalives so the kernel detects dead provider connections
         # instead of letting them sit silently in CLOSE-WAIT (#10324).  Without
         # this, a peer that drops mid-stream leaves the socket in a state where

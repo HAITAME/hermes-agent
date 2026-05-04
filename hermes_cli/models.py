@@ -444,6 +444,34 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "us.meta.llama4-maverick-17b-instruct-v1:0",
         "us.meta.llama4-scout-17b-instruct-v1:0",
     ],
+    "oca": [
+        "oca/gpt-oss-120b",
+        "oca/llama4",
+        "oca/gpt-4.1",
+        "oca/gpt-5.4",
+        "oca/openai-o3",
+        "oca/grok3",
+        "oca/grok4",
+        "oca/grok4-fast-reasoning",
+        "oca/grok-code-fast-1",
+        "oca/gpt-5",
+        "oca/gpt-5-mini",
+        "oca/gpt-5-codex",
+        "oca/gpt-5.1",
+        "oca/gpt-5.2",
+        "oca/gpt-5.1-codex",
+        "oca/gpt-5.1-codex-mini",
+        "oca/gpt-5.1-codex-max",
+        "oca/gpt-5.2-codex",
+        "oca/gpt-5.3-codex",
+        "oca/gpt-5.4-pro",
+        "oca/gpt-5.4-mini",
+        "oca/gpt-5.4-nano",
+        "oca/grok4-1-fast-reasoning",
+        "oca/grok4-20-reasoning",
+        "oca/gpt-5.5",
+        "oca/gpt-5.5-pro",
+    ],
     # Azure Foundry: user-provided endpoint and model.
     # Empty list because models depend on the endpoint configuration.
     "azure-foundry": [],
@@ -805,6 +833,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("kilocode",       "Kilo Code",                "Kilo Code (Kilo Gateway API)"),
     ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (35+ curated models, pay-as-you-go)"),
     ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (open models, $10/month subscription)"),
+    ProviderEntry("oca",            "Oracle Code Assist",       "Oracle Code Assist (OCA; SSO or bearer token)"),
     ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock (Claude, Nova, Llama, DeepSeek — IAM or API key)"),
     ProviderEntry("azure-foundry",  "Azure Foundry",            "Azure Foundry (OpenAI-style or Anthropic-style endpoint — your Azure AI deployment)"),
     ProviderEntry("ai-gateway",     "Vercel AI Gateway",        "Vercel AI Gateway"),
@@ -892,6 +921,11 @@ _PROVIDER_ALIASES = {
     "tokenhub": "tencent-tokenhub",
     "tencent-cloud": "tencent-tokenhub",
     "tencentmaas": "tencent-tokenhub",
+    "oracle": "oca",
+    "oca": "oca",
+    "oracle-code-assist": "oca",
+    "oci-code-assist": "oca",
+    "code-assist": "oca",
     "aws": "bedrock",
     "aws-bedrock": "bedrock",
     "amazon-bedrock": "bedrock",
@@ -1998,6 +2032,10 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         live = fetch_ollama_cloud_models(force_refresh=force_refresh)
         if live:
             return live
+    if normalized == "oca":
+        live = _fetch_oca_models()
+        if live:
+            return live
     if normalized == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if api_key:
@@ -2078,6 +2116,143 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
     if normalized in _MODELS_DEV_PREFERRED:
         return _merge_with_models_dev(normalized, curated_static)
     return curated_static
+
+
+def _normalize_oca_model_lookup_id(model_id: Optional[str]) -> str:
+    normalized = str(model_id or "").strip().lower()
+    if not normalized:
+        return ""
+    return normalized if normalized.startswith("oca/") else f"oca/{normalized}"
+
+
+_OCA_MODEL_API_MODE_OVERRIDES: dict[str, str] = {}
+
+
+def _oca_api_mode_from_supported_api_list(value: Any) -> Optional[str]:
+    if not isinstance(value, list):
+        return None
+    supported = {str(item).strip().upper() for item in value if str(item).strip()}
+    if "RESPONSES" in supported:
+        return "codex_responses"
+    if "CHAT_COMPLETIONS" in supported:
+        return "chat_completions"
+    return None
+
+
+def _extract_oca_model_ids(payload: Any) -> list[str]:
+    """Extract OCA model IDs and cache API capabilities from OCA payloads."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+    ids: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            params = item.get("litellm_params")
+            model_id = params.get("model") if isinstance(params, dict) else None
+        if isinstance(model_id, str) and model_id.strip():
+            model_id = model_id.strip()
+            ids.append(model_id)
+            model_info = item.get("model_info")
+            supported_api_list = (
+                model_info.get("supported_api_list")
+                if isinstance(model_info, dict)
+                else item.get("supported_api_list")
+            )
+            api_mode = _oca_api_mode_from_supported_api_list(supported_api_list)
+            if api_mode:
+                _OCA_MODEL_API_MODE_OVERRIDES[_normalize_oca_model_lookup_id(model_id)] = api_mode
+    return list(dict.fromkeys(ids))
+
+
+_OCA_RESPONSES_CAPABLE_MODELS: frozenset[str] = frozenset({
+    "oca/gpt-4.1",
+    "oca/openai-o3",
+    "oca/gpt-5",
+    "oca/gpt-5-mini",
+    "oca/gpt-5-codex",
+    "oca/gpt-5.1",
+    "oca/gpt-5.1-codex",
+    "oca/gpt-5.1-codex-mini",
+    "oca/gpt-5.1-codex-max",
+    "oca/gpt-5.2",
+    "oca/gpt-5.2-codex",
+    "oca/gpt-5.3-codex",
+    "oca/gpt-5.4",
+    "oca/gpt-5.4-pro",
+    "oca/gpt-5.4-mini",
+    "oca/gpt-5.4-nano",
+    "oca/gpt-5.5",
+    "oca/gpt-5.5-pro",
+})
+
+
+def oca_model_api_mode(model_id: Optional[str]) -> str:
+    """Prefer Responses API for OCA models that advertise it.
+
+    OCA's ``/v1/model/info`` advertises ``supported_api_list``.  Most models
+    that support ``RESPONSES`` also support ``CHAT_COMPLETIONS``; prefer the
+    richer Responses transport when available and use chat completions for
+    chat-only models.
+    """
+    lookup = _normalize_oca_model_lookup_id(model_id)
+    if not lookup:
+        return "chat_completions"
+    cached = _OCA_MODEL_API_MODE_OVERRIDES.get(lookup)
+    if cached:
+        return cached
+    return "codex_responses" if lookup in _OCA_RESPONSES_CAPABLE_MODELS else "chat_completions"
+
+
+def _fetch_oca_models(timeout: float = 15.0) -> list[str]:
+    """Fetch OCA models, preferring OpenAI-compatible /v1/models.
+
+    OCA's primary models endpoint is OpenAI-compatible and returns
+    ``data[].id`` (for example ``oca/gpt-4.1``).  OCA also exposes LiteLLM's
+    ``/v1/model/info`` with a different shape, where the model lives under
+    ``data[].litellm_params.model`` and API capabilities live under
+    ``data[].model_info.supported_api_list``.  Use ``/models`` for the visible
+    picker order and ``/model/info`` to cache transport preferences.
+    """
+    try:
+        import httpx
+        from agent.oca import create_oca_headers, resolve_oca_runtime_credentials
+
+        creds = resolve_oca_runtime_credentials()
+        api_key = str(creds.get("api_key") or "").strip()
+        base_url = str(creds.get("base_url") or "").strip().rstrip("/")
+        if not api_key or not base_url:
+            return []
+        headers = create_oca_headers(api_key, "models-refresh")
+        models_path, info_path = (
+            ("/models", "/model/info")
+            if base_url.endswith("/v1")
+            else ("/v1/models", "/v1/model/info")
+        )
+        model_ids: list[str] = []
+        try:
+            resp = httpx.get(f"{base_url}{models_path}", headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            model_ids = _extract_oca_model_ids(resp.json())
+        except Exception:
+            pass
+        try:
+            resp = httpx.get(f"{base_url}{info_path}", headers=headers, timeout=timeout)
+            resp.raise_for_status()
+            info_ids = _extract_oca_model_ids(resp.json())
+            if info_ids and not model_ids:
+                return info_ids
+        except Exception:
+            pass
+        if model_ids:
+            return model_ids
+    except Exception:
+        return []
+    return []
 
 
 def _fetch_anthropic_models(timeout: float = 5.0) -> Optional[list[str]]:

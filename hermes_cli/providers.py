@@ -189,6 +189,12 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
         transport="openai_chat",
         base_url_env_var="OLLAMA_BASE_URL",
     ),
+    "oca": HermesOverlay(
+        transport="openai_chat",
+        extra_env_vars=("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"),
+        base_url_override="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        base_url_env_var="OCA_BASE_URL",
+    ),
     # Azure Foundry: supports both OpenAI-style and Anthropic-style endpoints.
     # The transport is determined at runtime from config.yaml model.api_mode.
     "azure-foundry": HermesOverlay(
@@ -325,6 +331,13 @@ ALIASES: Dict[str, str] = {
     "amazon-bedrock": "bedrock",
     "amazon": "bedrock",
 
+    # oracle code assist
+    "oracle": "oca",
+    "oca": "oca",
+    "oracle-code-assist": "oca",
+    "oci-code-assist": "oca",
+    "code-assist": "oca",
+
     # arcee
     "arcee-ai": "arcee",
     "arceeai": "arcee",
@@ -359,6 +372,7 @@ _LABEL_OVERRIDES: Dict[str, str] = {
     "tencent-tokenhub": "Tencent TokenHub",
     "lmstudio": "LM Studio",
     "local": "Local endpoint",
+    "oca": "Oracle Code Assist",
     "bedrock": "AWS Bedrock",
     "ollama-cloud": "Ollama Cloud",
 }
