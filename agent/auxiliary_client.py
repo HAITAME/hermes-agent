@@ -275,6 +275,7 @@ _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "kilocode": "google/gemini-3-flash-preview",
     "ollama-cloud": "nemotron-3-nano:30b",
     "tencent-tokenhub": "hy3-preview",
+    "oca": "oca/gpt-oss-120b",
 }
 
 # Legacy alias — callers that haven't been updated to _get_aux_model_for_provider()
@@ -1219,6 +1220,10 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
                 from hermes_cli.models import copilot_default_headers
 
                 extra["default_headers"] = copilot_default_headers()
+            elif provider_id == "oca":
+                from agent.oca import create_oca_headers
+
+                extra["default_headers"] = create_oca_headers(api_key)
             else:
                 try:
                     from providers import get_provider_profile as _gpf_aux
@@ -1254,6 +1259,10 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             from hermes_cli.models import copilot_default_headers
 
             extra["default_headers"] = copilot_default_headers()
+        elif provider_id == "oca":
+            from agent.oca import create_oca_headers
+
+            extra["default_headers"] = create_oca_headers(api_key)
         else:
             try:
                 from providers import get_provider_profile as _gpf_aux2
@@ -2077,7 +2086,18 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
         )
     elif base_url_host_matches(sync_base_url, "api.kimi.com"):
         async_kwargs["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
+    elif _is_oca_base_url(sync_base_url):
+        from agent.oca import create_oca_headers
+
+        async_kwargs["default_headers"] = create_oca_headers(
+            str(getattr(sync_client, "api_key", "") or "")
+        )
     return AsyncOpenAI(**async_kwargs), model
+
+
+def _is_oca_base_url(base_url: Optional[str]) -> bool:
+    hostname = base_url_hostname(str(base_url or ""))
+    return hostname.endswith(".oci.oraclecloud.com") and "aiservice" in hostname
 
 
 def _normalize_resolved_model(model_name: Optional[str], provider: str) -> Optional[str]:
@@ -2492,6 +2512,10 @@ def resolve_provider_client(
             headers.update(copilot_request_headers(
                 is_agent_turn=True, is_vision=is_vision
             ))
+        elif provider == "oca":
+            from agent.oca import create_oca_headers
+
+            headers.update(create_oca_headers(api_key))
         client = OpenAI(api_key=api_key, base_url=base_url,
                         **({"default_headers": headers} if headers else {}))
 
@@ -3434,6 +3458,56 @@ def _build_call_kwargs(
     return kwargs
 
 
+def _coerce_sse_chat_completion_response(response: Any) -> Any:
+    """Convert accidental OpenAI-compatible SSE text into a completion object."""
+    if not isinstance(response, str):
+        return response
+    text = response.lstrip()
+    if not text.startswith("data:"):
+        return response
+
+    content_parts: List[str] = []
+    role = "assistant"
+    finish_reason = None
+    for raw_line in response.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            data = json.loads(payload)
+        except Exception:
+            continue
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, dict):
+                if delta.get("role"):
+                    role = str(delta["role"])
+                if delta.get("content") is not None:
+                    content_parts.append(str(delta["content"]))
+            if choice.get("finish_reason") is not None:
+                finish_reason = choice.get("finish_reason")
+
+    if not content_parts:
+        return response
+
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(role=role, content="".join(content_parts)),
+                finish_reason=finish_reason,
+            )
+        ]
+    )
+
+
 def _validate_llm_response(response: Any, task: str = None) -> Any:
     """Validate that an LLM response has the expected .choices[0].message shape.
 
@@ -3447,6 +3521,7 @@ def _validate_llm_response(response: Any, task: str = None) -> Any:
         raise RuntimeError(
             f"Auxiliary {task or 'call'}: LLM returned None response"
         )
+    response = _coerce_sse_chat_completion_response(response)
     # Allow SimpleNamespace responses from adapters (CodexAuxiliaryClient,
     # AnthropicAuxiliaryClient) — they have .choices[0].message.
     try:
