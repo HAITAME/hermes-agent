@@ -833,7 +833,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("kilocode",       "Kilo Code",                "Kilo Code (Kilo Gateway API)"),
     ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (35+ curated models, pay-as-you-go)"),
     ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (open models, $10/month subscription)"),
-    ProviderEntry("oca",            "Oracle Code Assist",       "Oracle Code Assist (OCA; SSO or bearer token)"),
+    ProviderEntry("oca",            "Oracle Code Assist",       "Oracle Code Assist (OCA; Oracle SSO, requires OCA access)"),
     ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock (Claude, Nova, Llama, DeepSeek — IAM or API key)"),
     ProviderEntry("azure-foundry",  "Azure Foundry",            "Azure Foundry (OpenAI-style or Anthropic-style endpoint — your Azure AI deployment)"),
     ProviderEntry("ai-gateway",     "Vercel AI Gateway",        "Vercel AI Gateway"),
@@ -1902,7 +1902,7 @@ def _resolve_copilot_catalog_api_key() -> str:
 #     truth for the subscription tier.
 # Also excluded: providers that already have dedicated live-endpoint
 # branches below (copilot, anthropic, ai-gateway, ollama-cloud, custom,
-# stepfun, openai-codex) — those paths handle freshness themselves.
+# stepfun, openai-codex, oca) — those paths handle freshness themselves.
 _MODELS_DEV_PREFERRED: frozenset[str] = frozenset({
     "opencode-go",
     "opencode-zen",
@@ -2033,7 +2033,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
         if live:
             return live
     if normalized == "oca":
-        live = _fetch_oca_models()
+        live = _fetch_oca_models(force_refresh=force_refresh)
         if live:
             return live
     if normalized == "openai":
@@ -2126,6 +2126,8 @@ def _normalize_oca_model_lookup_id(model_id: Optional[str]) -> str:
 
 
 _OCA_MODEL_API_MODE_OVERRIDES: dict[str, str] = {}
+_OCA_MODEL_REASONING_OVERRIDES: dict[str, bool] = {}
+_OCA_MODEL_LIST_TIMEOUT = 2.0
 
 
 def _oca_api_mode_from_supported_api_list(value: Any) -> Optional[str]:
@@ -2140,7 +2142,7 @@ def _oca_api_mode_from_supported_api_list(value: Any) -> Optional[str]:
 
 
 def _extract_oca_model_ids(payload: Any) -> list[str]:
-    """Extract OCA model IDs and cache API capabilities from OCA payloads."""
+    """Extract OCA model IDs and cache advertised API modes."""
     if not isinstance(payload, dict):
         return []
     data = payload.get("data")
@@ -2165,91 +2167,96 @@ def _extract_oca_model_ids(payload: Any) -> list[str]:
             )
             api_mode = _oca_api_mode_from_supported_api_list(supported_api_list)
             if api_mode:
-                _OCA_MODEL_API_MODE_OVERRIDES[_normalize_oca_model_lookup_id(model_id)] = api_mode
+                lookup = _normalize_oca_model_lookup_id(model_id)
+                _OCA_MODEL_API_MODE_OVERRIDES[lookup] = api_mode
+                if isinstance(model_info, dict) and isinstance(model_info.get("is_reasoning_model"), bool):
+                    _OCA_MODEL_REASONING_OVERRIDES[lookup] = model_info["is_reasoning_model"]
     return list(dict.fromkeys(ids))
 
 
-_OCA_RESPONSES_CAPABLE_MODELS: frozenset[str] = frozenset({
-    "oca/gpt-4.1",
-    "oca/openai-o3",
-    "oca/gpt-5",
-    "oca/gpt-5-mini",
-    "oca/gpt-5-codex",
-    "oca/gpt-5.1",
-    "oca/gpt-5.1-codex",
-    "oca/gpt-5.1-codex-mini",
-    "oca/gpt-5.1-codex-max",
-    "oca/gpt-5.2",
-    "oca/gpt-5.2-codex",
-    "oca/gpt-5.3-codex",
-    "oca/gpt-5.4",
-    "oca/gpt-5.4-pro",
-    "oca/gpt-5.4-mini",
-    "oca/gpt-5.4-nano",
-    "oca/gpt-5.5",
-    "oca/gpt-5.5-pro",
-})
-
-
 def oca_model_api_mode(model_id: Optional[str]) -> str:
-    """Prefer Responses API for OCA models that advertise it.
-
-    OCA's ``/v1/model/info`` advertises ``supported_api_list``.  Most models
-    that support ``RESPONSES`` also support ``CHAT_COMPLETIONS``; prefer the
-    richer Responses transport when available and use chat completions for
-    chat-only models.
-    """
+    """Return the API mode advertised by OCA, defaulting to chat completions."""
     lookup = _normalize_oca_model_lookup_id(model_id)
     if not lookup:
         return "chat_completions"
     cached = _OCA_MODEL_API_MODE_OVERRIDES.get(lookup)
     if cached:
         return cached
-    return "codex_responses" if lookup in _OCA_RESPONSES_CAPABLE_MODELS else "chat_completions"
+    try:
+        _fetch_oca_models(force_refresh=True)
+    except Exception:
+        pass
+    return _OCA_MODEL_API_MODE_OVERRIDES.get(lookup, "chat_completions")
 
 
-def _fetch_oca_models(timeout: float = 15.0) -> list[str]:
-    """Fetch OCA models, preferring OpenAI-compatible /v1/models.
+def oca_model_is_reasoning_model(model_id: Optional[str]) -> bool:
+    """Return whether OCA advertises reasoning support for this model."""
+    lookup = _normalize_oca_model_lookup_id(model_id)
+    if not lookup:
+        return True
+    cached = _OCA_MODEL_REASONING_OVERRIDES.get(lookup)
+    if cached is not None:
+        return cached
+    try:
+        _fetch_oca_models(force_refresh=True)
+    except Exception:
+        pass
+    return _OCA_MODEL_REASONING_OVERRIDES.get(lookup, True)
 
-    OCA's primary models endpoint is OpenAI-compatible and returns
-    ``data[].id`` (for example ``oca/gpt-4.1``).  OCA also exposes LiteLLM's
-    ``/v1/model/info`` with a different shape, where the model lives under
-    ``data[].litellm_params.model`` and API capabilities live under
-    ``data[].model_info.supported_api_list``.  Use ``/models`` for the visible
-    picker order and ``/model/info`` to cache transport preferences.
-    """
+
+def _oca_model_list_timeout() -> float:
+    raw = os.getenv("HERMES_OCA_MODEL_LIST_TIMEOUT", "").strip()
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _OCA_MODEL_LIST_TIMEOUT
+
+
+def _fetch_oca_models(timeout: Optional[float] = None, *, force_refresh: bool = False) -> list[str]:
+    """Fetch account-visible OCA models and cache ``/model/info`` capabilities."""
     try:
         import httpx
         from agent.oca import create_oca_headers, resolve_oca_runtime_credentials
 
+        if timeout is None:
+            timeout = _oca_model_list_timeout()
         creds = resolve_oca_runtime_credentials()
         api_key = str(creds.get("api_key") or "").strip()
         base_url = str(creds.get("base_url") or "").strip().rstrip("/")
+        if not api_key:
+            try:
+                from agent.credential_pool import load_pool
+
+                entry = load_pool("oca").select()
+                if entry is not None:
+                    api_key = str(
+                        getattr(entry, "runtime_api_key", None)
+                        or getattr(entry, "access_token", "")
+                        or ""
+                    ).strip()
+                    base_url = str(
+                        getattr(entry, "runtime_base_url", None)
+                        or getattr(entry, "base_url", None)
+                        or base_url
+                    ).strip().rstrip("/")
+            except Exception:
+                pass
         if not api_key or not base_url:
             return []
         headers = create_oca_headers(api_key, "models-refresh")
-        models_path, info_path = (
-            ("/models", "/model/info")
-            if base_url.endswith("/v1")
-            else ("/v1/models", "/v1/model/info")
-        )
-        model_ids: list[str] = []
-        try:
-            resp = httpx.get(f"{base_url}{models_path}", headers=headers, timeout=timeout)
-            resp.raise_for_status()
-            model_ids = _extract_oca_model_ids(resp.json())
-        except Exception:
-            pass
+        info_path = "/model/info" if base_url.endswith("/v1") else "/v1/model/info"
         try:
             resp = httpx.get(f"{base_url}{info_path}", headers=headers, timeout=timeout)
             resp.raise_for_status()
             info_ids = _extract_oca_model_ids(resp.json())
-            if info_ids and not model_ids:
+            if info_ids:
                 return info_ids
         except Exception:
             pass
-        if model_ids:
-            return model_ids
     except Exception:
         return []
     return []

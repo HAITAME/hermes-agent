@@ -1343,8 +1343,8 @@ def list_authenticated_providers(
         if not has_creds:
             continue
 
-        if hermes_slug in {"copilot", "copilot-acp"}:
-            model_ids = provider_model_ids(hermes_slug)
+        if hermes_slug in {"copilot", "copilot-acp", "oca"}:
+            model_ids = provider_model_ids(hermes_slug, force_refresh=True)
         # For aws_sdk providers (bedrock), use live discovery so the list
         # reflects the active region (eu.*, ap.*) not the static us.* list.
         elif overlay.auth_type == "aws_sdk":

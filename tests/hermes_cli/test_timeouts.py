@@ -306,3 +306,51 @@ def test_explicit_non_stream_stale_timeout_is_honored_for_local_endpoints(monkey
     )
 
     assert agent._compute_non_stream_stale_timeout([]) == 300.0
+
+
+def test_oca_reasoning_model_gets_longer_stream_stale_timeout(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.delenv("HERMES_STREAM_STALE_TIMEOUT", raising=False)
+
+    from run_agent import AIAgent
+    agent = AIAgent(
+        model="gpt-5.5",
+        provider="oca",
+        api_key="sk-dummy",
+        base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+        platform="cli",
+    )
+
+    assert agent._compute_stream_stale_timeout({"model": "gpt-5.5", "messages": []}) == 600.0
+
+
+def test_stream_stale_timeout_honors_provider_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.delenv("HERMES_STREAM_STALE_TIMEOUT", raising=False)
+    _write_config(
+        tmp_path,
+        """\
+        providers:
+          oca:
+            stale_timeout_seconds: 900
+        """,
+    )
+
+    from run_agent import AIAgent
+    agent = AIAgent(
+        model="gpt-5.5",
+        provider="oca",
+        api_key="sk-dummy",
+        base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+        platform="cli",
+    )
+
+    assert agent._compute_stream_stale_timeout({"model": "gpt-5.5", "messages": []}) == 900.0

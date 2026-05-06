@@ -54,6 +54,8 @@ class ResponsesApiTransport(ProviderTransport):
             is_github_responses: bool — Copilot/GitHub models backend
             is_codex_backend: bool — chatgpt.com/backend-api/codex
             is_xai_responses: bool — xAI/Grok backend
+            is_oca_responses: bool — Oracle Code Assist Responses endpoint
+            oca_supports_reasoning: bool — OCA model metadata flag
             github_reasoning_extra: dict | None — Copilot reasoning params
         """
         from agent.codex_responses_adapter import (
@@ -75,6 +77,8 @@ class ResponsesApiTransport(ProviderTransport):
         is_github_responses = params.get("is_github_responses", False)
         is_codex_backend = params.get("is_codex_backend", False)
         is_xai_responses = params.get("is_xai_responses", False)
+        is_oca_responses = params.get("is_oca_responses", False)
+        oca_supports_reasoning = params.get("oca_supports_reasoning", True)
 
         # Resolve reasoning effort
         reasoning_effort = "medium"
@@ -103,7 +107,9 @@ class ResponsesApiTransport(ProviderTransport):
         if not is_github_responses and session_id:
             kwargs["prompt_cache_key"] = session_id
 
-        if reasoning_enabled and is_xai_responses:
+        if reasoning_enabled and is_oca_responses and not oca_supports_reasoning:
+            pass
+        elif reasoning_enabled and is_xai_responses:
             kwargs["include"] = ["reasoning.encrypted_content"]
         elif reasoning_enabled:
             if is_github_responses:

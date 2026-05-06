@@ -443,6 +443,12 @@ def normalize_model_for_provider(model_input: str, target_provider: str) -> str:
             return name.split("/", 1)[1]
         return stripped
 
+    if provider == "oca":
+        bare = _strip_matching_provider_prefix(name, provider)
+        if "/" in bare:
+            bare = _strip_vendor_prefix(bare)
+        return bare if bare.startswith("oca/") else f"oca/{bare}"
+
     # --- DeepSeek: map to one of two canonical names ---
     if provider == "deepseek":
         bare = _strip_matching_provider_prefix(name, provider)

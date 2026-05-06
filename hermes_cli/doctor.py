@@ -499,6 +499,7 @@ def run_doctor(args):
                 "huggingface",
                 "lmstudio",
                 "nous",
+                "oca",
             }
             if (
                 default_model
@@ -648,6 +649,7 @@ def run_doctor(args):
             get_codex_auth_status,
             get_gemini_oauth_auth_status,
             get_minimax_oauth_auth_status,
+            get_auth_status,
         )
 
         nous_status = get_nous_auth_status()
@@ -684,6 +686,14 @@ def run_doctor(args):
             check_ok("MiniMax OAuth", f"(logged in, region={region})")
         else:
             check_warn("MiniMax OAuth", "(not logged in)")
+
+        oca_status = get_auth_status("oca")
+        if oca_status.get("logged_in"):
+            source = oca_status.get("key_source") or oca_status.get("source") or ""
+            suffix = f", source={source}" if source else ""
+            check_ok("Oracle Code Assist auth", f"(logged in{suffix})")
+        else:
+            check_warn("Oracle Code Assist auth", "(not logged in)")
     except Exception as e:
         check_warn("Auth provider status", f"(could not check: {e})")
 

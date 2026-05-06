@@ -84,6 +84,33 @@ def test_unknown_base_url_clears_default_headers(mock_openai):
 
 
 @patch("run_agent.OpenAI")
+def test_oca_client_uses_plain_bearer_headers(mock_openai):
+    mock_openai.return_value = MagicMock()
+    agent = AIAgent(
+        api_key="oca-token",
+        base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        model="oca/gpt-oss-120b",
+        provider="oca",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+    )
+
+    agent._create_openai_client(
+        {
+            "api_key": "oca-token",
+            "base_url": "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        },
+        reason="test",
+        shared=True,
+    )
+
+    kwargs = mock_openai.call_args.kwargs
+    assert kwargs["base_url"] == "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm"
+    assert "default_headers" not in kwargs
+
+
+@patch("run_agent.OpenAI")
 def test_openrouter_headers_include_response_cache_when_enabled(mock_openai):
     """When openrouter.response_cache is True, the cache header is injected."""
     mock_openai.return_value = MagicMock()

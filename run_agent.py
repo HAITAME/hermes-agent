@@ -2910,6 +2910,42 @@ class AIAgent:
             return max(stale_base, 450.0)
         return stale_base
 
+    def _resolved_stream_stale_timeout_base(self) -> tuple[float, bool]:
+        """Resolve the base streaming stale timeout and whether it is implicit."""
+        cfg = get_provider_stale_timeout(self.provider, self.model)
+        if cfg is not None:
+            return cfg, False
+
+        env_timeout = os.getenv("HERMES_STREAM_STALE_TIMEOUT")
+        if env_timeout is not None:
+            return float(env_timeout), False
+
+        return 180.0, True
+
+    def _compute_stream_stale_timeout(self, api_kwargs: dict) -> float:
+        """Compute the effective streaming stale timeout for this request."""
+        stale_base, uses_implicit_default = self._resolved_stream_stale_timeout_base()
+        base_url = getattr(self, "_base_url", None) or self.base_url or ""
+        if uses_implicit_default and base_url and is_local_endpoint(base_url):
+            return float("inf")
+
+        model = str(api_kwargs.get("model") or self.model or "").lower()
+        provider = str(self.provider or "").lower()
+        if uses_implicit_default and provider == "oca" and (
+            model.startswith("gpt-5")
+            or "/gpt-5" in model
+            or model.startswith("openai-o")
+            or "/openai-o" in model
+        ):
+            stale_base = max(stale_base, 600.0)
+
+        est_tokens = sum(len(str(v)) for v in api_kwargs.get("messages", [])) // 4
+        if est_tokens > 100_000:
+            return max(stale_base, 300.0)
+        if est_tokens > 50_000:
+            return max(stale_base, 240.0)
+        return stale_base
+
     def _is_openrouter_url(self) -> bool:
         """Return True when the base URL targets OpenRouter."""
         return base_url_host_matches(self._base_url_lower, "openrouter.ai")
@@ -5628,15 +5664,6 @@ class AIAgent:
                     self._client_log_context(),
                 )
                 return client
-        if self.provider == "oca" or base_url_host_matches(
-            str(client_kwargs.get("base_url", "") or ""),
-            "code-internal.aiservice.us-chicago-1.oci.oraclecloud.com",
-        ):
-            from agent.oca import create_oca_headers
-
-            headers = dict(client_kwargs.get("default_headers") or {})
-            headers.update(create_oca_headers(str(client_kwargs.get("api_key") or "")))
-            client_kwargs["default_headers"] = headers
         # Inject TCP keepalives so the kernel detects dead provider connections
         # instead of letting them sit silently in CLOSE-WAIT (#10324).  Without
         # this, a peer that drops mid-stream leaves the socket in a state where
@@ -7477,26 +7504,9 @@ class AIAgent:
                 if request_client is not None:
                     self._close_request_openai_client(request_client, reason="stream_request_complete")
 
-        _stream_stale_timeout_base = float(os.getenv("HERMES_STREAM_STALE_TIMEOUT", 180.0))
-        # Local providers (Ollama, oMLX, llama-cpp) can take 300+ seconds
-        # for prefill on large contexts.  Disable the stale detector unless
-        # the user explicitly set HERMES_STREAM_STALE_TIMEOUT.
-        if _stream_stale_timeout_base == 180.0 and self.base_url and is_local_endpoint(self.base_url):
-            _stream_stale_timeout = float("inf")
-            logger.debug("Local provider detected (%s) — stale stream timeout disabled", self.base_url)
-        else:
-            # Scale the stale timeout for large contexts: slow models (like Opus)
-            # can legitimately think for minutes before producing the first token
-            # when the context is large.  Without this, the stale detector kills
-            # healthy connections during the model's thinking phase, producing
-            # spurious RemoteProtocolError ("peer closed connection").
-            _est_tokens = sum(len(str(v)) for v in api_kwargs.get("messages", [])) // 4
-            if _est_tokens > 100_000:
-                _stream_stale_timeout = max(_stream_stale_timeout_base, 300.0)
-            elif _est_tokens > 50_000:
-                _stream_stale_timeout = max(_stream_stale_timeout_base, 240.0)
-            else:
-                _stream_stale_timeout = _stream_stale_timeout_base
+        # Scale the stale timeout for providers/models that can legitimately
+        # spend several minutes reasoning before the first visible delta.
+        _stream_stale_timeout = self._compute_stream_stale_timeout(api_kwargs)
 
         t = threading.Thread(target=_call, daemon=True)
         t.start()
@@ -8491,6 +8501,15 @@ class AIAgent:
                 )
             )
             is_xai_responses = self.provider == "xai" or self._base_url_hostname == "api.x.ai"
+            is_oca_responses = (self.provider or "").strip().lower() == "oca"
+            oca_supports_reasoning = True
+            if is_oca_responses:
+                try:
+                    from hermes_cli.models import oca_model_is_reasoning_model
+
+                    oca_supports_reasoning = oca_model_is_reasoning_model(self.model)
+                except Exception:
+                    pass
             _msgs_for_codex = self._prepare_messages_for_non_vision_model(api_messages)
             return _ct.build_kwargs(
                 model=self.model,
@@ -8503,6 +8522,8 @@ class AIAgent:
                 is_github_responses=is_github_responses,
                 is_codex_backend=is_codex_backend,
                 is_xai_responses=is_xai_responses,
+                is_oca_responses=is_oca_responses,
+                oca_supports_reasoning=oca_supports_reasoning,
                 github_reasoning_extra=self._github_models_reasoning_extra_body() if is_github_responses else None,
             )
 
@@ -11380,10 +11401,17 @@ class AIAgent:
                             self.thinking_callback("")
 
                     _use_streaming = True
+                    _streaming_required = (
+                        (self.provider or "").strip().lower() == "oca"
+                        or (
+                            base_url_host_matches(self._base_url_lower, "oci.oraclecloud.com")
+                            and "aiservice" in self._base_url_lower
+                        )
+                    )
                     # Provider signaled "stream not supported" on a previous
                     # attempt — switch to non-streaming for the rest of this
                     # session instead of re-failing every retry.
-                    if getattr(self, "_disable_streaming", False):
+                    if getattr(self, "_disable_streaming", False) and not _streaming_required:
                         _use_streaming = False
                     # CopilotACPClient communicates via subprocess stdio and
                     # returns a plain SimpleNamespace — not an iterable
@@ -11395,7 +11423,7 @@ class AIAgent:
                         or str(self.base_url or "").lower().startswith("acp+tcp://")
                     ):
                         _use_streaming = False
-                    elif not self._has_stream_consumers():
+                    elif not self._has_stream_consumers() and not _streaming_required:
                         # No display/TTS consumer. Still prefer streaming for
                         # health checking, but skip for Mock clients in tests
                         # (mocks return SimpleNamespace, not stream iterators).

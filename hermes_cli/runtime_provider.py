@@ -231,10 +231,6 @@ def _resolve_runtime_from_pool_entry(
         from hermes_cli.models import oca_model_api_mode
 
         api_mode = oca_model_api_mode(effective_model)
-        configured_provider = str(model_cfg.get("provider") or "").strip().lower()
-        configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
-        if api_mode != "codex_responses" and configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
-            api_mode = configured_mode
     elif provider == "copilot":
         api_mode = _copilot_runtime_api_mode(model_cfg, getattr(entry, "runtime_api_key", ""))
         base_url = base_url or PROVIDER_REGISTRY["copilot"].inference_base_url
@@ -889,10 +885,6 @@ def _resolve_explicit_runtime(
 
             effective_model = str(target_model or model_cfg.get("default") or "").strip()
             api_mode = oca_model_api_mode(effective_model)
-            configured_provider = str(model_cfg.get("provider") or "").strip().lower()
-            configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
-            if api_mode != "codex_responses" and configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
-                api_mode = configured_mode
         else:
             configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
             if configured_mode:
@@ -1320,10 +1312,6 @@ def resolve_runtime_provider(
 
             _effective = target_model or model_cfg.get("default", "")
             api_mode = oca_model_api_mode(_effective)
-            configured_provider = str(model_cfg.get("provider") or "").strip().lower()
-            configured_mode = _parse_api_mode(model_cfg.get("api_mode"))
-            if api_mode != "codex_responses" and configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
-                api_mode = configured_mode
         else:
             configured_provider = str(model_cfg.get("provider") or "").strip().lower()
             # Only honor persisted api_mode when it belongs to the same provider family.

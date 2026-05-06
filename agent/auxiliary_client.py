@@ -47,7 +47,7 @@ import threading
 import time
 from pathlib import Path  # noqa: F401 — used by test mocks
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import urlparse, parse_qs, urlunparse
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
@@ -2086,12 +2086,6 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
         )
     elif base_url_host_matches(sync_base_url, "api.kimi.com"):
         async_kwargs["default_headers"] = {"User-Agent": "claude-code/0.1.0"}
-    elif _is_oca_base_url(sync_base_url):
-        from agent.oca import create_oca_headers
-
-        async_kwargs["default_headers"] = create_oca_headers(
-            str(getattr(sync_client, "api_key", "") or "")
-        )
     return AsyncOpenAI(**async_kwargs), model
 
 
@@ -2512,10 +2506,6 @@ def resolve_provider_client(
             headers.update(copilot_request_headers(
                 is_agent_turn=True, is_vision=is_vision
             ))
-        elif provider == "oca":
-            from agent.oca import create_oca_headers
-
-            headers.update(create_oca_headers(api_key))
         client = OpenAI(api_key=api_key, base_url=base_url,
                         **({"default_headers": headers} if headers else {}))
 
@@ -3540,6 +3530,90 @@ def _validate_llm_response(response: Any, task: str = None) -> Any:
     return response
 
 
+def _chat_completion_chunk_content(chunk: Any) -> tuple[str, Optional[str]]:
+    """Extract text and finish reason from a chat completion chunk."""
+    try:
+        choices = chunk.choices
+    except AttributeError:
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+    if not choices:
+        return "", None
+    choice = choices[0]
+    try:
+        delta = choice.delta
+        finish_reason = getattr(choice, "finish_reason", None)
+    except AttributeError:
+        delta = choice.get("delta") if isinstance(choice, dict) else None
+        finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+    if isinstance(delta, dict):
+        content = delta.get("content")
+    else:
+        content = getattr(delta, "content", None)
+    return (str(content) if content is not None else ""), finish_reason
+
+
+def _completion_from_stream_chunks(chunks: Iterable[Any]) -> Any:
+    content_parts: List[str] = []
+    finish_reason = None
+    for chunk in chunks:
+        content, chunk_finish = _chat_completion_chunk_content(chunk)
+        if content:
+            content_parts.append(content)
+        if chunk_finish is not None:
+            finish_reason = chunk_finish
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(role="assistant", content="".join(content_parts)),
+                finish_reason=finish_reason,
+            )
+        ]
+    )
+
+
+async def _completion_from_async_stream_chunks(chunks: Any) -> Any:
+    content_parts: List[str] = []
+    finish_reason = None
+    async for chunk in chunks:
+        content, chunk_finish = _chat_completion_chunk_content(chunk)
+        if content:
+            content_parts.append(content)
+        if chunk_finish is not None:
+            finish_reason = chunk_finish
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(role="assistant", content="".join(content_parts)),
+                finish_reason=finish_reason,
+            )
+        ]
+    )
+
+
+def _requires_streaming_chat_completions(provider: Optional[str], base_url: Optional[str]) -> bool:
+    return (provider or "").strip().lower() == "oca" or _is_oca_base_url(base_url)
+
+
+def _chat_completions_create(client: Any, kwargs: Dict[str, Any], provider: Optional[str], base_url: Optional[str]) -> Any:
+    if not _requires_streaming_chat_completions(provider, base_url):
+        return client.chat.completions.create(**kwargs)
+    stream_kwargs = dict(kwargs)
+    stream_kwargs["stream"] = True
+    stream_kwargs.setdefault("stream_options", {"include_usage": True})
+    return _completion_from_stream_chunks(client.chat.completions.create(**stream_kwargs))
+
+
+async def _async_chat_completions_create(client: Any, kwargs: Dict[str, Any], provider: Optional[str], base_url: Optional[str]) -> Any:
+    if not _requires_streaming_chat_completions(provider, base_url):
+        return await client.chat.completions.create(**kwargs)
+    stream_kwargs = dict(kwargs)
+    stream_kwargs["stream"] = True
+    stream_kwargs.setdefault("stream_options", {"include_usage": True})
+    return await _completion_from_async_stream_chunks(
+        await client.chat.completions.create(**stream_kwargs)
+    )
+
+
 def call_llm(
     task: str = None,
     *,
@@ -3669,7 +3743,7 @@ def call_llm(
     # then payment fallback.
     try:
         return _validate_llm_response(
-            client.chat.completions.create(**kwargs), task)
+            _chat_completions_create(client, kwargs, resolved_provider, _client_base), task)
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -3680,7 +3754,7 @@ def call_llm(
             )
             try:
                 return _validate_llm_response(
-                    client.chat.completions.create(**retry_kwargs), task)
+                    _chat_completions_create(client, retry_kwargs, resolved_provider, _client_base), task)
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 # If retry still fails, fall through to the max_tokens /
@@ -3708,7 +3782,7 @@ def call_llm(
             kwargs["max_completion_tokens"] = max_tokens
             try:
                 return _validate_llm_response(
-                    client.chat.completions.create(**kwargs), task)
+                    _chat_completions_create(client, kwargs, resolved_provider, _client_base), task)
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -3737,8 +3811,9 @@ def call_llm(
                             task or "call")
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
+                _refreshed_base = str(getattr(refreshed_client, "base_url", "") or "")
                 return _validate_llm_response(
-                    refreshed_client.chat.completions.create(**kwargs), task)
+                    _chat_completions_create(refreshed_client, kwargs, resolved_provider, _refreshed_base), task)
 
         # ── Auth refresh retry ───────────────────────────────────────
         if (_is_auth_error(first_err)
@@ -3781,7 +3856,7 @@ def call_llm(
                     if _is_anthropic_compat_endpoint(resolved_provider, _retry_base):
                         retry_kwargs["messages"] = _convert_openai_images_to_anthropic(retry_kwargs["messages"])
                     return _validate_llm_response(
-                        retry_client.chat.completions.create(**retry_kwargs), task)
+                        _chat_completions_create(retry_client, retry_kwargs, resolved_provider, _retry_base), task)
 
         # ── Payment / credit exhaustion fallback ──────────────────────
         # When the resolved provider returns 402 or a credit-related error,
@@ -3827,8 +3902,9 @@ def call_llm(
                     tools=tools, timeout=effective_timeout,
                     extra_body=effective_extra_body,
                     base_url=str(getattr(fb_client, "base_url", "") or ""))
+                _fb_base = str(getattr(fb_client, "base_url", "") or "")
                 return _validate_llm_response(
-                    fb_client.chat.completions.create(**fb_kwargs), task)
+                    _chat_completions_create(fb_client, fb_kwargs, fb_label, _fb_base), task)
         raise
 
 
@@ -3979,7 +4055,7 @@ async def async_call_llm(
 
     try:
         return _validate_llm_response(
-            await client.chat.completions.create(**kwargs), task)
+            await _async_chat_completions_create(client, kwargs, resolved_provider, _client_base), task)
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -3990,7 +4066,7 @@ async def async_call_llm(
             )
             try:
                 return _validate_llm_response(
-                    await client.chat.completions.create(**retry_kwargs), task)
+                    await _async_chat_completions_create(client, retry_kwargs, resolved_provider, _client_base), task)
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 if not (
@@ -4014,7 +4090,7 @@ async def async_call_llm(
             kwargs["max_completion_tokens"] = max_tokens
             try:
                 return _validate_llm_response(
-                    await client.chat.completions.create(**kwargs), task)
+                    await _async_chat_completions_create(client, kwargs, resolved_provider, _client_base), task)
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -4042,8 +4118,9 @@ async def async_call_llm(
                             task or "call")
                 if refreshed_model and refreshed_model != kwargs.get("model"):
                     kwargs["model"] = refreshed_model
+                _refreshed_base = str(getattr(refreshed_client, "base_url", "") or "")
                 return _validate_llm_response(
-                    await refreshed_client.chat.completions.create(**kwargs), task)
+                    await _async_chat_completions_create(refreshed_client, kwargs, resolved_provider, _refreshed_base), task)
 
         # ── Auth refresh retry (mirrors sync call_llm) ───────────────
         if (_is_auth_error(first_err)
@@ -4085,7 +4162,7 @@ async def async_call_llm(
                     if _is_anthropic_compat_endpoint(resolved_provider, _retry_base):
                         retry_kwargs["messages"] = _convert_openai_images_to_anthropic(retry_kwargs["messages"])
                     return _validate_llm_response(
-                        await retry_client.chat.completions.create(**retry_kwargs), task)
+                        await _async_chat_completions_create(retry_client, retry_kwargs, resolved_provider, _retry_base), task)
 
         # ── Payment / connection / rate-limit fallback (mirrors sync call_llm) ──
         should_fallback = (
@@ -4118,6 +4195,7 @@ async def async_call_llm(
                 )
                 if async_fb_model and async_fb_model != fb_kwargs.get("model"):
                     fb_kwargs["model"] = async_fb_model
+                _fb_base = str(getattr(async_fb, "base_url", "") or getattr(fb_client, "base_url", "") or "")
                 return _validate_llm_response(
-                    await async_fb.chat.completions.create(**fb_kwargs), task)
+                    await _async_chat_completions_create(async_fb, fb_kwargs, fb_label, _fb_base), task)
         raise

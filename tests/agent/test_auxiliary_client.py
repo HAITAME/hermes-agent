@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -25,6 +26,8 @@ from agent.auxiliary_client import (
     _try_payment_fallback,
     _resolve_auto,
     _validate_llm_response,
+    _chat_completions_create,
+    _async_chat_completions_create,
 )
 
 
@@ -1949,25 +1952,71 @@ class TestBuildCallKwargsToolDedup:
 
 
 class TestOcaAuxiliaryStreaming:
-    def test_oca_call_kwargs_omit_stream_by_provider(self):
+    def test_oca_call_kwargs_omit_stream_until_request_dispatch(self):
         kwargs = _build_call_kwargs(
             provider="oca",
             model="oca/gpt-oss-120b",
             messages=[{"role": "user", "content": "title"}],
-            base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm/v1",
+            base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
         )
 
         assert "stream" not in kwargs
 
-    def test_oca_call_kwargs_omit_stream_by_base_url_for_auto_provider(self):
-        kwargs = _build_call_kwargs(
-            provider="auto",
-            model="oca/gpt-oss-120b",
-            messages=[{"role": "user", "content": "title"}],
-            base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm/v1/",
+    def test_oca_auxiliary_dispatch_forces_streaming(self):
+        chunks = [
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Project"), finish_reason=None)]),
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=" title"), finish_reason="stop")]),
+        ]
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=MagicMock(return_value=iter(chunks)))
+            )
+        )
+        kwargs = {
+            "model": "oca/gpt-oss-120b",
+            "messages": [{"role": "user", "content": "title"}],
+        }
+
+        response = _chat_completions_create(
+            client,
+            kwargs,
+            "oca",
+            "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
         )
 
+        sent = client.chat.completions.create.call_args.kwargs
+        assert sent["stream"] is True
+        assert sent["stream_options"] == {"include_usage": True}
         assert "stream" not in kwargs
+        assert response.choices[0].message.content == "Project title"
+
+    @pytest.mark.asyncio
+    async def test_oca_async_auxiliary_dispatch_forces_streaming(self):
+        async def _chunks():
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Project"), finish_reason=None)])
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=" title"), finish_reason="stop")])
+
+        create = AsyncMock(return_value=_chunks())
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        kwargs = {
+            "model": "oca/gpt-oss-120b",
+            "messages": [{"role": "user", "content": "title"}],
+        }
+
+        response = await _async_chat_completions_create(
+            client,
+            kwargs,
+            "auto",
+            "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
+        )
+
+        sent = create.call_args.kwargs
+        assert sent["stream"] is True
+        assert sent["stream_options"] == {"include_usage": True}
+        assert "stream" not in kwargs
+        assert response.choices[0].message.content == "Project title"
 
     def test_validate_llm_response_coerces_accidental_sse_chunks(self):
         sse = "\n".join([

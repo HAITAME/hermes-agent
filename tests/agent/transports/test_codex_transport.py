@@ -75,6 +75,32 @@ class TestCodexBuildKwargs:
         )
         assert kw.get("reasoning", {}).get("effort") == "high"
 
+    def test_oca_non_reasoning_responses_omits_reasoning_fields(self, transport):
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="oca/gpt-4.1",
+            messages=messages,
+            tools=[],
+            reasoning_config={"effort": "high"},
+            is_oca_responses=True,
+            oca_supports_reasoning=False,
+        )
+        assert "reasoning" not in kw
+        assert "include" not in kw
+
+    def test_oca_reasoning_responses_preserves_reasoning_fields(self, transport):
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="oca/gpt-5.5",
+            messages=messages,
+            tools=[],
+            reasoning_config={"effort": "high"},
+            is_oca_responses=True,
+            oca_supports_reasoning=True,
+        )
+        assert kw["reasoning"] == {"effort": "high", "summary": "auto"}
+        assert kw["include"] == ["reasoning.encrypted_content"]
+
     def test_reasoning_disabled(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(

@@ -1957,6 +1957,8 @@ def select_provider_and_model(args=None):
         _model_flow_minimax_oauth(config, current_model, args=args)
     elif selected_provider == "google-gemini-cli":
         _model_flow_google_gemini_cli(config, current_model)
+    elif selected_provider == "oca":
+        _model_flow_oca(config, current_model, args=args)
     elif selected_provider == "copilot-acp":
         _model_flow_copilot_acp(config, current_model)
     elif selected_provider == "copilot":
@@ -2992,6 +2994,93 @@ def _model_flow_google_gemini_cli(_config, current_model=""):
         )
     else:
         print("No change.")
+
+
+def _model_flow_oca(_config, current_model="", args=None):
+    """Oracle Code Assist provider setup and model selection."""
+    from agent.credential_pool import load_pool
+    from hermes_cli.auth import (
+        _prompt_model_selection,
+        _save_model_choice,
+        _update_config_for_provider,
+    )
+    from hermes_cli.auth_commands import auth_add_command
+    from hermes_cli.config import load_config, save_config
+    from hermes_cli.models import _PROVIDER_MODELS, oca_model_api_mode, provider_model_ids
+
+    def _select_credential():
+        pool = load_pool("oca")
+        return pool.select()
+
+    entry = _select_credential()
+    if entry is not None:
+        label = getattr(entry, "label", "") or getattr(entry, "source", "") or "configured credential"
+        print(f"  Oracle Code Assist credentials: {label} ✓")
+        print()
+        print("    1. Use existing credentials")
+        print("    2. Reauthenticate with Oracle SSO")
+        print("    3. Cancel")
+        print()
+        try:
+            choice = input("  Choice [1/2/3]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            choice = "1"
+        if choice == "2":
+            entry = None
+        elif choice == "3":
+            return
+    else:
+        print("No usable Oracle Code Assist credential found. Starting Oracle SSO login...")
+        print()
+
+    if entry is None:
+        try:
+            auth_add_command(
+                argparse.Namespace(
+                    provider="oca",
+                    auth_type="oauth",
+                    label=None,
+                    api_key=None,
+                    no_browser=bool(getattr(args, "no_browser", False)),
+                )
+            )
+        except SystemExit:
+            print("Login cancelled or failed.")
+            return
+        except Exception as exc:
+            print(f"Login failed: {exc}")
+            return
+        entry = _select_credential()
+        if entry is None:
+            print("Login did not produce a usable Oracle Code Assist credential.")
+            return
+
+    model_ids = provider_model_ids("oca") or list(_PROVIDER_MODELS.get("oca", []))
+    selected = _prompt_model_selection(model_ids, current_model=current_model)
+    if not selected:
+        print("No change.")
+        return
+
+    base_url = (
+        getattr(entry, "runtime_base_url", None)
+        or getattr(entry, "base_url", None)
+        or ""
+    )
+    _save_model_choice(selected)
+    _update_config_for_provider("oca", str(base_url or ""))
+
+    cfg = load_config()
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        model = {"default": selected}
+        cfg["model"] = model
+    model["default"] = selected
+    model["provider"] = "oca"
+    if base_url:
+        model["base_url"] = str(base_url).rstrip("/")
+    model["api_mode"] = oca_model_api_mode(selected)
+    save_config(cfg)
+    print(f"Default model set to: {selected} (via Oracle Code Assist)")
 
 
 def _model_flow_custom(config):
