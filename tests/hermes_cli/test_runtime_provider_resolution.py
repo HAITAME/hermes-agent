@@ -147,6 +147,38 @@ def test_oca_responses_capable_model_uses_responses_api(monkeypatch):
     assert resolved["api_mode"] == "codex_responses"
 
 
+def test_oca_explicit_runtime_uses_target_model_for_api_mode(monkeypatch):
+    from hermes_cli.models import _OCA_MODEL_API_MODE_OVERRIDES, _extract_oca_model_ids
+
+    _OCA_MODEL_API_MODE_OVERRIDES.clear()
+    _extract_oca_model_ids({
+        "data": [
+            {
+                "litellm_params": {"model": "oca/gpt-oss-120b"},
+                "model_info": {"supported_api_list": ["CHAT_COMPLETIONS"]},
+            },
+            {
+                "litellm_params": {"model": "oca/gpt-5.3-codex"},
+                "model_info": {"supported_api_list": ["RESPONSES", "CHAT_COMPLETIONS"]},
+            },
+        ]
+    })
+    monkeypatch.setattr(rp, "_get_model_config", lambda: {
+        "provider": "oca",
+        "default": "oca/gpt-oss-120b",
+    })
+
+    resolved = rp.resolve_runtime_provider(
+        requested="oca",
+        explicit_api_key="oca-token",
+        explicit_base_url="https://oca.example.com/litellm",
+        target_model="oca/gpt-5.3-codex",
+    )
+
+    assert resolved["provider"] == "oca"
+    assert resolved["api_mode"] == "codex_responses"
+
+
 def test_oca_chat_model_uses_chat_completions(monkeypatch):
     monkeypatch.setattr(rp, "_get_model_config", lambda: {
         "provider": "oca",

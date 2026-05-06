@@ -983,6 +983,7 @@ def resolve_runtime_provider(
         model_cfg=model_cfg,
         explicit_api_key=explicit_api_key,
         explicit_base_url=explicit_base_url,
+        target_model=target_model,
     )
     if explicit_runtime:
         return explicit_runtime
