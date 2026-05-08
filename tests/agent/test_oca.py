@@ -15,9 +15,7 @@ from agent.oca import create_oca_headers, get_oca_config
 @pytest.fixture(autouse=True)
 def _clear_oca_env(monkeypatch):
     for key in (
-        "OCA_ACCESS_TOKEN",
         "OCA_API_KEY",
-        "OCI_CODE_ASSIST_TOKEN",
         "OCA_BASE_URL",
         "OCA_IDCS_URL",
         "OCA_IDCS_CLIENT_ID",
@@ -71,7 +69,7 @@ def test_oca_config_defaults_match_cline_loopback_callback():
 
 def test_oca_pool_refresh_persists_token(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    for key in ("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"):
+    for key in ("OCA_API_KEY",):
         monkeypatch.delenv(key, raising=False)
 
     hermes_home = tmp_path / "hermes"

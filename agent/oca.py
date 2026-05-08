@@ -28,7 +28,7 @@ DEFAULT_OCA_PORTS = tuple(range(48801, 48812))
 DEFAULT_OCA_REDIRECT_HOST = "127.0.0.1"
 DEFAULT_OCA_REDIRECT_PATH = "/auth/oca"
 
-_TOKEN_ENV_VARS = ("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN")
+_TOKEN_ENV_VARS = ("OCA_API_KEY",)
 
 
 def _jwt_expiry_seconds(token: str) -> int:

@@ -191,7 +191,7 @@ HERMES_OVERLAYS: Dict[str, HermesOverlay] = {
     ),
     "oca": HermesOverlay(
         transport="openai_chat",
-        extra_env_vars=("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"),
+        extra_env_vars=("OCA_API_KEY",),
         base_url_override="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
         base_url_env_var="OCA_BASE_URL",
     ),

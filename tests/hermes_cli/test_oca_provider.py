@@ -31,9 +31,7 @@ def _clear_oca_env(monkeypatch, tmp_path):
     _OCA_MODEL_API_MODE_OVERRIDES.clear()
     _OCA_MODEL_REASONING_OVERRIDES.clear()
     for key in (
-        "OCA_ACCESS_TOKEN",
         "OCA_API_KEY",
-        "OCI_CODE_ASSIST_TOKEN",
         "OCA_BASE_URL",
         "HERMES_OCA_MODEL_LIST_TIMEOUT",
     ):
@@ -47,13 +45,13 @@ def test_oca_provider_registry():
     assert pconfig.inference_base_url == (
         "https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm"
     )
-    assert pconfig.api_key_env_vars == ("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN")
+    assert pconfig.api_key_env_vars == ("OCA_API_KEY",)
     assert pconfig.base_url_env_var == "OCA_BASE_URL"
 
 
 @pytest.mark.parametrize("alias", ["oca", "oracle", "oracle-code-assist", "oci-code-assist", "code-assist"])
 def test_oca_aliases(alias, monkeypatch):
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "oca-token")
+    monkeypatch.setenv("OCA_API_KEY", "oca-token")
     assert resolve_provider(alias) == "oca"
     assert normalize_provider(alias) == "oca"
 
@@ -66,7 +64,7 @@ def test_oca_credentials_from_token_env(monkeypatch):
 
 
 def test_oca_base_url_override(monkeypatch):
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "oca-token")
+    monkeypatch.setenv("OCA_API_KEY", "oca-token")
     monkeypatch.setenv("OCA_BASE_URL", "https://oca.example.com/litellm")
     creds = resolve_api_key_provider_credentials("oca")
     assert creds["base_url"] == "https://oca.example.com/litellm"
@@ -127,7 +125,7 @@ def test_oca_model_catalog_static_fallback():
 def test_oca_model_catalog_reads_model_info_endpoint(monkeypatch):
     import httpx
 
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "token-from-env")
+    monkeypatch.setenv("OCA_API_KEY", "token-from-env")
     monkeypatch.setenv("OCA_BASE_URL", "https://oca.example.com/litellm")
     calls = []
 
@@ -164,7 +162,7 @@ def test_oca_model_catalog_reads_model_info_endpoint(monkeypatch):
 def test_oca_model_catalog_uses_model_info_shape(monkeypatch):
     import httpx
 
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "token-from-env")
+    monkeypatch.setenv("OCA_API_KEY", "token-from-env")
     monkeypatch.setenv("OCA_BASE_URL", "https://oca.example.com/litellm")
     calls = []
 
@@ -218,7 +216,7 @@ def test_oca_model_catalog_uses_model_info_shape(monkeypatch):
 def test_oca_model_catalog_falls_back_to_static_on_network_error(monkeypatch):
     import httpx
 
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "token-from-env")
+    monkeypatch.setenv("OCA_API_KEY", "token-from-env")
     monkeypatch.setenv("OCA_BASE_URL", "https://oca.example.com/litellm")
 
     def _get(url, **kwargs):
@@ -232,7 +230,7 @@ def test_oca_model_catalog_falls_back_to_static_on_network_error(monkeypatch):
 def test_oca_model_catalog_honors_timeout_env_and_refreshes_each_call(monkeypatch):
     import httpx
 
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "token-from-env")
+    monkeypatch.setenv("OCA_API_KEY", "token-from-env")
     monkeypatch.setenv("OCA_BASE_URL", "https://oca.example.com/litellm")
     monkeypatch.setenv("HERMES_OCA_MODEL_LIST_TIMEOUT", "0.25")
     calls = []
@@ -260,7 +258,7 @@ def test_oca_model_catalog_honors_timeout_env_and_refreshes_each_call(monkeypatc
 def test_oca_model_picker_uses_live_catalog(monkeypatch):
     from hermes_cli.model_switch import list_authenticated_providers
 
-    monkeypatch.setenv("OCA_ACCESS_TOKEN", "token-from-env")
+    monkeypatch.setenv("OCA_API_KEY", "token-from-env")
 
     with patch("agent.models_dev.fetch_models_dev", return_value={}), patch(
         "hermes_cli.models._fetch_oca_models",
@@ -375,7 +373,7 @@ def test_oca_overlay():
 
     overlay = HERMES_OVERLAYS["oca"]
     assert overlay.transport == "openai_chat"
-    assert overlay.extra_env_vars == ("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN")
+    assert overlay.extra_env_vars == ("OCA_API_KEY",)
     assert overlay.base_url_env_var == "OCA_BASE_URL"
 
 

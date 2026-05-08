@@ -403,7 +403,7 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         name="Oracle Code Assist",
         auth_type="api_key",
         inference_base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
-        api_key_env_vars=("OCA_ACCESS_TOKEN", "OCA_API_KEY", "OCI_CODE_ASSIST_TOKEN"),
+        api_key_env_vars=("OCA_API_KEY",),
         base_url_env_var="OCA_BASE_URL",
     ),
     "bedrock": ProviderConfig(
