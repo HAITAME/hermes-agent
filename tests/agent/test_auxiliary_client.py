@@ -1955,7 +1955,7 @@ class TestOcaAuxiliaryStreaming:
     def test_oca_call_kwargs_omit_stream_until_request_dispatch(self):
         kwargs = _build_call_kwargs(
             provider="oca",
-            model="oca/gpt-oss-120b",
+            model="oca/gpt-5.4-mini",
             messages=[{"role": "user", "content": "title"}],
             base_url="https://code-internal.aiservice.us-chicago-1.oci.oraclecloud.com/20250206/app/litellm",
         )
@@ -1973,7 +1973,7 @@ class TestOcaAuxiliaryStreaming:
             )
         )
         kwargs = {
-            "model": "oca/gpt-oss-120b",
+            "model": "oca/gpt-5.4-mini",
             "messages": [{"role": "user", "content": "title"}],
         }
 
@@ -2001,7 +2001,7 @@ class TestOcaAuxiliaryStreaming:
             chat=SimpleNamespace(completions=SimpleNamespace(create=create))
         )
         kwargs = {
-            "model": "oca/gpt-oss-120b",
+            "model": "oca/gpt-5.4-mini",
             "messages": [{"role": "user", "content": "title"}],
         }
 
