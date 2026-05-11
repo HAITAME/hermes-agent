@@ -15,7 +15,6 @@ from hermes_cli.models import (
     CANONICAL_PROVIDERS,
     _OCA_MODEL_API_MODE_OVERRIDES,
     _OCA_MODEL_REASONING_OVERRIDES,
-    _PROVIDER_MODELS,
     normalize_provider,
     oca_model_api_mode,
     oca_model_is_reasoning_model,
@@ -115,11 +114,8 @@ def test_oca_model_catalog_uses_credential_pool(monkeypatch, tmp_path):
     assert calls[0][1]["headers"]["Authorization"] == "Bearer pool-token"
 
 
-def test_oca_model_catalog_static_fallback():
-    assert "oca" in _PROVIDER_MODELS
-    assert "oca/gpt-oss-120b" in provider_model_ids("oca")
-    assert "oca/gpt-4.1" in provider_model_ids("oca")
-    assert "oca/gpt-5.5" in provider_model_ids("oca")
+def test_oca_model_catalog_has_no_static_fallback():
+    assert provider_model_ids("oca") == []
 
 
 def test_oca_model_catalog_reads_model_info_endpoint(monkeypatch):
@@ -213,7 +209,7 @@ def test_oca_model_catalog_uses_model_info_shape(monkeypatch):
     assert calls == ["https://oca.example.com/litellm/v1/model/info"]
 
 
-def test_oca_model_catalog_falls_back_to_static_on_network_error(monkeypatch):
+def test_oca_model_catalog_returns_empty_on_network_error(monkeypatch):
     import httpx
 
     monkeypatch.setenv("OCA_API_KEY", "token-from-env")
@@ -224,7 +220,7 @@ def test_oca_model_catalog_falls_back_to_static_on_network_error(monkeypatch):
 
     monkeypatch.setattr(httpx, "get", _get)
 
-    assert provider_model_ids("oca") == list(_PROVIDER_MODELS["oca"])
+    assert provider_model_ids("oca") == []
 
 
 def test_oca_model_catalog_honors_timeout_env_and_refreshes_each_call(monkeypatch):

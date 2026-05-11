@@ -37,7 +37,7 @@ def _jwt_with_exp(exp: int) -> str:
 def test_create_oca_headers():
     headers = create_oca_headers("access-token", "task-123")
     assert headers["Authorization"] == "Bearer access-token"
-    assert headers["client"] == "Hermes"
+    assert headers["client"] == "hermes-agent"
     assert headers["opc-request-id"]
     assert len(headers["opc-request-id"]) == 32
 

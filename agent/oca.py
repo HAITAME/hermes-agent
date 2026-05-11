@@ -313,7 +313,7 @@ def create_oca_headers(access_token: str, task_id: str = "") -> Dict[str, str]:
     return {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
-        "client": "Hermes",
+        "client": "hermes-agent",
         "client-version": "hermes-agent",
         "client-ide": "Hermes CLI",
         "client-ide-version": "hermes-agent",

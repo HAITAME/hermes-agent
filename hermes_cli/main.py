@@ -3006,7 +3006,7 @@ def _model_flow_oca(_config, current_model="", args=None):
     )
     from hermes_cli.auth_commands import auth_add_command
     from hermes_cli.config import load_config, save_config
-    from hermes_cli.models import _PROVIDER_MODELS, oca_model_api_mode, provider_model_ids
+    from hermes_cli.models import oca_model_api_mode, provider_model_ids
 
     def _select_credential():
         pool = load_pool("oca")
@@ -3055,7 +3055,7 @@ def _model_flow_oca(_config, current_model="", args=None):
             print("Login did not produce a usable Oracle Code Assist credential.")
             return
 
-    model_ids = provider_model_ids("oca") or list(_PROVIDER_MODELS.get("oca", []))
+    model_ids = provider_model_ids("oca")
     selected = _prompt_model_selection(model_ids, current_model=current_model)
     if not selected:
         print("No change.")
